@@ -13,7 +13,7 @@
     <header>
         <h1 class="main-title">
             <span class="rocket-icon">🚀</span>
-            !שלום יואל
+            שלום יואל!
             <span class="rocket-icon">🌟</span>
         </h1>
         <p class="subtitle">ברוכים הבאים לחוקר החלל</p>
@@ -52,6 +52,8 @@
                         <iframe id="apod-video" class="apod-video" style="display:none;" allowfullscreen></iframe>
                     </div>
                     <div class="apod-info">
+                        <p id="apod-nasa-note" class="apod-nasa-note">התמונה והטקסט באנגלית מאתר נאס"א</p>
+                        <p id="apod-fallback-note" class="apod-fallback-note" style="display:none;"></p>
                         <h2 id="apod-title" class="apod-title"></h2>
                         <p id="apod-explanation" class="apod-explanation"></p>
                         <p id="apod-copyright" class="apod-copyright"></p>
@@ -81,6 +83,11 @@
                         <span class="hud-label">חיים</span>
                         <span id="lives" class="hud-value">❤️❤️❤️</span>
                     </div>
+                    <div class="hud-item combo-display" id="combo-display" style="display:none;">
+                        <span class="hud-label">קומבו</span>
+                        <span id="combo" class="hud-value combo-value">x2</span>
+                    </div>
+                    <button id="sound-toggle" class="sound-toggle-btn" title="השתק/הפעל צלילים">🔊</button>
                 </div>
                 <div class="canvas-container">
                     <canvas id="game-canvas"></canvas>
@@ -88,27 +95,45 @@
                         <div class="overlay-content">
                             <h2 class="game-title">🚀 משחק חלל 🚀</h2>
                             <p class="game-instructions">
-                                ⬅️➡️⬆️⬇️ חצים לתנועה<br>
+                                חצים לתנועה ← → ↑ ↓<br>
                                 רווח לירי 🔫<br>
                                 <span class="touch-hint">📱 גע במסך לירי, החלק לתנועה</span>
                             </p>
-                            <button id="start-btn" class="start-btn">!התחל לשחק 🎮</button>
+                            <button id="start-btn" class="start-btn">התחל לשחק! 🎮</button>
                             <p id="high-score-display" class="high-score"></p>
                         </div>
                     </div>
                     <div id="game-over-overlay" class="game-overlay" style="display:none;">
                         <div class="overlay-content game-over-content">
-                            <h2 class="game-over-title">!המשחק נגמר 💥</h2>
+                            <h2 class="game-over-title">המשחק נגמר! 💥</h2>
                             <p class="final-score">ניקוד: <span id="final-score">0</span></p>
-                            <p id="new-high-score" class="new-high-score" style="display:none;">!🏆 שיא חדש 🏆</p>
+                            <p id="new-high-score" class="new-high-score" style="display:none;">🏆 שיא חדש! 🏆</p>
                             <p class="high-score">שיא: <span id="best-score">0</span></p>
-                            <button id="restart-btn" class="start-btn">!שחק שוב 🔄</button>
+                            <button id="restart-btn" class="start-btn">שחק שוב! 🔄</button>
                         </div>
                     </div>
                     <div id="level-up-overlay" class="game-overlay level-up-overlay" style="display:none;">
                         <div class="overlay-content">
-                            <h2 class="level-up-title">!🌟 שלב הבא 🌟</h2>
+                            <h2 class="level-up-title">🌟 שלב הבא! 🌟</h2>
                             <p class="level-up-number">שלב <span id="level-up-num">2</span></p>
+                        </div>
+                    </div>
+                    <div id="tutorial-overlay" class="game-overlay tutorial-overlay" style="display:none;">
+                        <div class="overlay-content tutorial-content">
+                            <h2 class="tutorial-title">🎓 איך לשחק</h2>
+                            <div class="tutorial-item">
+                                <span class="tutorial-keys">← → ↑ ↓</span>
+                                <span class="tutorial-desc">חצים לתנועה</span>
+                            </div>
+                            <div class="tutorial-item">
+                                <span class="tutorial-keys">[ רווח ]</span>
+                                <span class="tutorial-desc">רווח לירי</span>
+                            </div>
+                            <div class="tutorial-item">
+                                <span class="tutorial-keys">⭐</span>
+                                <span class="tutorial-desc">אסוף כוחות מיוחדים!</span>
+                            </div>
+                            <p class="tutorial-dismiss">לחץ על מקש כלשהו להתחיל...</p>
                         </div>
                     </div>
                 </div>

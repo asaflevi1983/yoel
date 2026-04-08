@@ -10,10 +10,13 @@ var SpaceGame = (function () {
     const BULLET_W = 4;
     const BULLET_H = 14;
     const STAR_COUNT = 120;
-    const SHOOT_COOLDOWN = 180; // ms
-    const POWERUP_CHANCE = 0.08;
+    const SHOOT_COOLDOWN = 180;
+    const POWERUP_CHANCE = 0.10;
     const POWERUP_SIZE = 28;
-    const POWERUP_DURATION = 8000; // ms
+    const POWERUP_DURATION = 8000;
+    const COMBO_WINDOW = 1500; // ms to maintain combo
+    const ASTEROID_SIZE_MIN = 20;
+    const ASTEROID_SIZE_MAX = 45;
 
     // Enemy types
     const ENEMY_TYPES = {
@@ -38,6 +41,194 @@ var SpaceGame = (function () {
         shield: '🛡️',
         life: '❤️',
     };
+    const POWERUP_LABELS = {
+        rapid: 'ירי מהיר!',
+        spread: 'פיזור!',
+        shield: 'מגן!',
+        life: 'חיים!',
+    };
+
+    // Wave formation patterns
+    const FORMATIONS = {
+        vShape: (count, startX) => {
+            const positions = [];
+            const spacing = 50;
+            for (let i = 0; i < count; i++) {
+                const side = i % 2 === 0 ? 1 : -1;
+                const row = Math.floor(i / 2);
+                positions.push({
+                    x: startX + side * row * spacing,
+                    y: -(row * 40 + 10),
+                    delay: row * 5,
+                });
+            }
+            return positions;
+        },
+        line: (count, startX) => {
+            const positions = [];
+            const totalW = count * 50;
+            const sx = Math.max(30, startX - totalW / 2);
+            for (let i = 0; i < count; i++) {
+                positions.push({
+                    x: Math.min(CANVAS_W - 50, sx + i * 50),
+                    y: -40,
+                    delay: i * 3,
+                });
+            }
+            return positions;
+        },
+        circle: (count, startX) => {
+            const positions = [];
+            const radius = 80;
+            const cx = Math.max(radius + 30, Math.min(CANVAS_W - radius - 30, startX));
+            for (let i = 0; i < count; i++) {
+                const angle = (Math.PI * 2 * i) / count;
+                positions.push({
+                    x: cx + Math.cos(angle) * radius,
+                    y: -100 + Math.sin(angle) * radius,
+                    delay: i * 2,
+                });
+            }
+            return positions;
+        },
+        zigzag: (count, startX) => {
+            const positions = [];
+            for (let i = 0; i < count; i++) {
+                positions.push({
+                    x: (i % 2 === 0) ? 100 : CANVAS_W - 140,
+                    y: -(i * 45 + 10),
+                    delay: i * 6,
+                });
+            }
+            return positions;
+        },
+    };
+
+    // ---- Sound Engine (Web Audio API oscillator-based) ----
+    class SoundEngine {
+        constructor() {
+            this.enabled = true;
+            this.ctx = null;
+        }
+
+        init() {
+            if (this.ctx) return;
+            try {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            } catch {
+                this.enabled = false;
+            }
+        }
+
+        toggle() {
+            this.enabled = !this.enabled;
+            return this.enabled;
+        }
+
+        play(fn) {
+            if (!this.enabled || !this.ctx) return;
+            try { fn(this.ctx); } catch { /* audio error */ }
+        }
+
+        laser() {
+            this.play(ctx => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(880, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(220, ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.12, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+                osc.start(ctx.currentTime);
+                osc.stop(ctx.currentTime + 0.1);
+            });
+        }
+
+        explosion() {
+            this.play(ctx => {
+                const bufferSize = ctx.sampleRate * 0.3;
+                const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+                }
+                const source = ctx.createBufferSource();
+                source.buffer = buffer;
+                const gain = ctx.createGain();
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(800, ctx.currentTime);
+                filter.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.3);
+                source.connect(filter);
+                filter.connect(gain);
+                gain.connect(ctx.destination);
+                gain.gain.setValueAtTime(0.25, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+                source.start(ctx.currentTime);
+            });
+        }
+
+        powerup() {
+            this.play(ctx => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.type = 'sine';
+                const t = ctx.currentTime;
+                osc.frequency.setValueAtTime(400, t);
+                osc.frequency.setValueAtTime(600, t + 0.08);
+                osc.frequency.setValueAtTime(800, t + 0.16);
+                osc.frequency.setValueAtTime(1000, t + 0.24);
+                gain.gain.setValueAtTime(0.15, t);
+                gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+                osc.start(t);
+                osc.stop(t + 0.35);
+            });
+        }
+
+        gameOverSound() {
+            this.play(ctx => {
+                const t = ctx.currentTime;
+                for (let i = 0; i < 4; i++) {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.type = 'sawtooth';
+                    const start = t + i * 0.2;
+                    osc.frequency.setValueAtTime(400 - i * 80, start);
+                    osc.frequency.exponentialRampToValueAtTime(80, start + 0.2);
+                    gain.gain.setValueAtTime(0.12, start);
+                    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.25);
+                    osc.start(start);
+                    osc.stop(start + 0.25);
+                }
+            });
+        }
+
+        levelUpSound() {
+            this.play(ctx => {
+                const t = ctx.currentTime;
+                const notes = [523, 659, 784, 1047];
+                notes.forEach((freq, i) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.type = 'sine';
+                    const start = t + i * 0.1;
+                    osc.frequency.setValueAtTime(freq, start);
+                    gain.gain.setValueAtTime(0.15, start);
+                    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.2);
+                    osc.start(start);
+                    osc.stop(start + 0.2);
+                });
+            });
+        }
+    }
 
     // ---- Game Class ----
     class Game {
@@ -50,6 +241,7 @@ var SpaceGame = (function () {
             this.overlay = document.getElementById('game-overlay');
             this.gameOverOverlay = document.getElementById('game-over-overlay');
             this.levelUpOverlay = document.getElementById('level-up-overlay');
+            this.tutorialOverlay = document.getElementById('tutorial-overlay');
             this.scoreEl = document.getElementById('score');
             this.levelEl = document.getElementById('level');
             this.livesEl = document.getElementById('lives');
@@ -58,24 +250,29 @@ var SpaceGame = (function () {
             this.newHighScoreEl = document.getElementById('new-high-score');
             this.highScoreDisplay = document.getElementById('high-score-display');
             this.levelUpNum = document.getElementById('level-up-num');
+            this.comboDisplay = document.getElementById('combo-display');
+            this.comboEl = document.getElementById('combo');
+            this.canvasContainer = this.canvas.closest('.canvas-container');
 
+            this.sound = new SoundEngine();
             this.running = false;
             this.animId = null;
             this.keys = {};
             this.lastShot = 0;
+            this.hasPlayedBefore = false;
 
             try {
                 this.highScore = parseInt(localStorage.getItem('space_high_score') || '0', 10);
+                this.hasPlayedBefore = localStorage.getItem('space_has_played') === 'true';
             } catch {
                 this.highScore = 0;
             }
             this.updateHighScoreDisplay();
 
             this.stars = this.createStars();
-
             this.bindEvents();
             this.resizeCanvas();
-            this.drawStars(); // Draw initial stars on canvas
+            this.drawStars();
         }
 
         // ---- Stars ----
@@ -139,6 +336,8 @@ var SpaceGame = (function () {
             this.enemies = [];
             this.particles = [];
             this.powerups = [];
+            this.asteroids = [];
+            this.floatingTexts = [];
             this.score = 0;
             this.lives = 3;
             this.level = 1;
@@ -149,6 +348,14 @@ var SpaceGame = (function () {
             this.bossActive = false;
             this.lastShot = 0;
             this.frameCount = 0;
+            this.combo = 0;
+            this.comboTimer = 0;
+            this.lastKillTime = 0;
+            this.waveQueue = [];
+            this.waveSpawnTimer = 0;
+            this.bossPhase = 0;
+            this.bossPhaseTimer = 0;
+            this.asteroidTimer = 0;
             this.updateHUD();
         }
 
@@ -157,6 +364,11 @@ var SpaceGame = (function () {
             document.addEventListener('keydown', (e) => {
                 this.keys[e.key] = true;
                 if (e.key === ' ' && this.running) e.preventDefault();
+                // Dismiss tutorial
+                if (this.showingTutorial) {
+                    this.dismissTutorial();
+                    e.preventDefault();
+                }
             });
             document.addEventListener('keyup', (e) => {
                 this.keys[e.key] = false;
@@ -164,6 +376,12 @@ var SpaceGame = (function () {
 
             document.getElementById('start-btn').addEventListener('click', () => this.start());
             document.getElementById('restart-btn').addEventListener('click', () => this.start());
+
+            // Sound toggle
+            document.getElementById('sound-toggle').addEventListener('click', () => {
+                const on = this.sound.toggle();
+                document.getElementById('sound-toggle').textContent = on ? '🔊' : '🔇';
+            });
 
             // Mobile D-pad
             const dpadBtns = document.querySelectorAll('.dpad-btn');
@@ -188,6 +406,7 @@ var SpaceGame = (function () {
             let touchId = null;
             this.canvas.addEventListener('touchstart', (e) => {
                 e.preventDefault();
+                if (this.showingTutorial) { this.dismissTutorial(); return; }
                 if (!this.running) return;
                 const touch = e.changedTouches[0];
                 touchId = touch.identifier;
@@ -232,12 +451,36 @@ var SpaceGame = (function () {
             this.canvas.style.height = (maxW * (CANVAS_H / CANVAS_W)) + 'px';
         }
 
+        // ---- Tutorial ----
+        showTutorial() {
+            this.showingTutorial = true;
+            this.tutorialOverlay.style.display = 'flex';
+        }
+
+        dismissTutorial() {
+            this.showingTutorial = false;
+            this.tutorialOverlay.style.display = 'none';
+            try { localStorage.setItem('space_has_played', 'true'); } catch { /* ok */ }
+            this.hasPlayedBefore = true;
+            this.actualStart();
+        }
+
         // ---- Start / Game Over ----
         start() {
+            this.sound.init();
             this.initState();
             this.overlay.style.display = 'none';
             this.gameOverOverlay.style.display = 'none';
             this.levelUpOverlay.style.display = 'none';
+
+            if (!this.hasPlayedBefore) {
+                this.showTutorial();
+                return;
+            }
+            this.actualStart();
+        }
+
+        actualStart() {
             this.running = true;
             if (this.animId) cancelAnimationFrame(this.animId);
             this.gameLoop();
@@ -245,11 +488,12 @@ var SpaceGame = (function () {
 
         gameOver() {
             this.running = false;
+            this.sound.gameOverSound();
             this.finalScoreEl.textContent = this.score;
 
             if (this.score > this.highScore) {
                 this.highScore = this.score;
-                try { localStorage.setItem('space_high_score', this.highScore.toString()); } catch { /* storage unavailable */ }
+                try { localStorage.setItem('space_high_score', this.highScore.toString()); } catch { /* */ }
                 this.newHighScoreEl.style.display = 'block';
             } else {
                 this.newHighScoreEl.style.display = 'none';
@@ -265,20 +509,78 @@ var SpaceGame = (function () {
             }
         }
 
+        // ---- Screen Shake ----
+        screenShake() {
+            this.canvasContainer.classList.add('shake');
+            setTimeout(() => this.canvasContainer.classList.remove('shake'), 300);
+        }
+
+        // ---- Floating Text ----
+        addFloatingText(x, y, text, color) {
+            this.floatingTexts.push({
+                x, y, text, color,
+                life: 1.0,
+                vy: -2,
+            });
+        }
+
+        updateFloatingTexts() {
+            for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+                const ft = this.floatingTexts[i];
+                ft.y += ft.vy;
+                ft.life -= 0.02;
+                if (ft.life <= 0) this.floatingTexts.splice(i, 1);
+            }
+        }
+
+        // ---- Combo System ----
+        addCombo() {
+            const now = Date.now();
+            if (now - this.lastKillTime < COMBO_WINDOW) {
+                this.combo++;
+            } else {
+                this.combo = 1;
+            }
+            this.lastKillTime = now;
+            this.comboTimer = COMBO_WINDOW;
+
+            if (this.combo >= 2) {
+                this.comboDisplay.style.display = 'flex';
+                this.comboEl.textContent = `x${this.combo}`;
+                this.comboDisplay.classList.remove('combo-display');
+                void this.comboDisplay.offsetWidth;
+                this.comboDisplay.classList.add('combo-display');
+            }
+        }
+
+        getComboMultiplier() {
+            if (this.combo < 2) return 1;
+            return Math.min(this.combo, 8);
+        }
+
+        updateCombo() {
+            if (this.combo > 0 && Date.now() - this.lastKillTime > COMBO_WINDOW) {
+                this.combo = 0;
+                this.comboDisplay.style.display = 'none';
+            }
+        }
+
         // ---- Level Up ----
         levelUp() {
             this.level++;
             this.enemiesKilled = 0;
-            this.enemiesPerLevel = 10 + this.level * 3;
-            this.spawnInterval = Math.max(20, 60 - this.level * 4);
+            this.enemiesPerLevel = Math.floor(10 + this.level * 2.5);
+            // Smoother difficulty: spawn interval decreases gently
+            this.spawnInterval = Math.max(25, 60 - this.level * 3);
 
             this.levelUpNum.textContent = this.level;
             this.levelUpOverlay.style.display = 'flex';
+            this.sound.levelUpSound();
             setTimeout(() => {
                 this.levelUpOverlay.style.display = 'none';
             }, 2000);
 
-            // Spawn boss every 5 levels
+            // Boss every 5 levels
             if (this.level % 5 === 0) {
                 this.spawnBoss();
             }
@@ -324,6 +626,7 @@ var SpaceGame = (function () {
         shoot() {
             const p = this.player;
             const cx = p.x + p.w / 2;
+            this.sound.laser();
 
             this.bullets.push({
                 x: cx - BULLET_W / 2,
@@ -334,7 +637,6 @@ var SpaceGame = (function () {
             });
 
             if (p.spreadShot) {
-                // Side bullets
                 this.bullets.push({
                     x: cx - BULLET_W / 2 - 12,
                     y: p.y - BULLET_H + 4,
@@ -354,7 +656,32 @@ var SpaceGame = (function () {
             }
         }
 
-        // ---- Enemies ----
+        // ---- Wave/Formation Spawning ----
+        spawnWave() {
+            const formKeys = Object.keys(FORMATIONS);
+            const formation = formKeys[Math.floor(Math.random() * formKeys.length)];
+            const count = Math.min(4 + Math.floor(this.level / 2), 10);
+            const startX = CANVAS_W / 2 + (Math.random() - 0.5) * 200;
+            const positions = FORMATIONS[formation](count, startX);
+
+            // Choose enemy type for wave
+            let type;
+            const r = Math.random();
+            if (this.level < 3) {
+                type = 'basic';
+            } else if (this.level < 5) {
+                type = r < 0.5 ? 'basic' : r < 0.8 ? 'fast' : 'tank';
+            } else if (this.level < 8) {
+                type = r < 0.3 ? 'basic' : r < 0.55 ? 'fast' : r < 0.8 ? 'tank' : 'shooter';
+            } else {
+                type = r < 0.15 ? 'basic' : r < 0.4 ? 'fast' : r < 0.65 ? 'tank' : 'shooter';
+            }
+
+            for (const pos of positions) {
+                this.waveQueue.push({ type, x: pos.x, y: pos.y, delay: pos.delay });
+            }
+        }
+
         spawnEnemy() {
             let type;
             const r = Math.random();
@@ -368,13 +695,17 @@ var SpaceGame = (function () {
                 type = r < 0.2 ? 'basic' : r < 0.45 ? 'fast' : r < 0.7 ? 'tank' : 'shooter';
             }
 
+            this.spawnEnemyOfType(type, Math.random() * (CANVAS_W - 50), -40);
+        }
+
+        spawnEnemyOfType(type, x, y) {
             const def = ENEMY_TYPES[type];
-            const speedMult = 1 + (this.level - 1) * 0.08;
+            const speedMult = 1 + (this.level - 1) * 0.06;
 
             this.enemies.push({
                 type,
-                x: Math.random() * (CANVAS_W - def.w),
-                y: -def.h,
+                x: Math.max(0, Math.min(CANVAS_W - def.w, x)),
+                y: y,
                 w: def.w,
                 h: def.h,
                 hp: def.hp,
@@ -406,8 +737,67 @@ var SpaceGame = (function () {
                 shootTimer: 30,
                 wobble: 0,
                 isBoss: true,
+                phase: 0,
+                phaseTimer: 0,
             });
             this.bossActive = true;
+        }
+
+        // ---- Asteroids ----
+        spawnAsteroid() {
+            const size = ASTEROID_SIZE_MIN + Math.random() * (ASTEROID_SIZE_MAX - ASTEROID_SIZE_MIN);
+            const fromLeft = Math.random() < 0.5;
+            this.asteroids.push({
+                x: fromLeft ? -size : CANVAS_W + size,
+                y: Math.random() * CANVAS_H * 0.6,
+                size,
+                vx: (fromLeft ? 1 : -1) * (Math.random() * 1.5 + 0.5),
+                vy: Math.random() * 0.8 + 0.3,
+                rotation: Math.random() * Math.PI * 2,
+                rotSpeed: (Math.random() - 0.5) * 0.04,
+                vertices: this.generateAsteroidShape(6 + Math.floor(Math.random() * 4)),
+            });
+        }
+
+        generateAsteroidShape(numVertices) {
+            const verts = [];
+            for (let i = 0; i < numVertices; i++) {
+                const angle = (Math.PI * 2 * i) / numVertices;
+                const r = 0.7 + Math.random() * 0.3;
+                verts.push({ angle, r });
+            }
+            return verts;
+        }
+
+        updateAsteroids() {
+            this.asteroidTimer++;
+            if (this.asteroidTimer > 200 - this.level * 5 && this.asteroids.length < 3) {
+                this.asteroidTimer = 0;
+                this.spawnAsteroid();
+            }
+
+            for (let i = this.asteroids.length - 1; i >= 0; i--) {
+                const a = this.asteroids[i];
+                a.x += a.vx;
+                a.y += a.vy;
+                a.rotation += a.rotSpeed;
+
+                // Remove if off-screen
+                if (a.x < -100 || a.x > CANVAS_W + 100 || a.y > CANVAS_H + 100) {
+                    this.asteroids.splice(i, 1);
+                    continue;
+                }
+
+                // Collision with player
+                if (!this.player.invincible) {
+                    const dx = (a.x) - (this.player.x + PLAYER_W / 2);
+                    const dy = (a.y) - (this.player.y + PLAYER_H / 2);
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < a.size / 2 + PLAYER_W / 3) {
+                        this.playerHit();
+                    }
+                }
+            }
         }
 
         updateEnemies() {
@@ -415,49 +805,97 @@ var SpaceGame = (function () {
                 const e = this.enemies[i];
                 e.y += e.speed;
 
-                // Wobble for non-boss
+                // Wobble for fast enemies
                 if (e.type === 'fast') {
                     e.wobble += 0.08;
                     e.x += Math.sin(e.wobble) * 2;
                 }
 
-                // Boss movement
+                // Boss movement with phases
                 if (e.isBoss && e.y > 40) {
                     e.y = 40;
-                    e.wobble += 0.02;
-                    e.x = CANVAS_W / 2 - e.w / 2 + Math.sin(e.wobble) * 150;
+                    e.phaseTimer++;
+
+                    // Boss attack patterns rotate
+                    const phaseDuration = 180;
+                    if (e.phaseTimer > phaseDuration) {
+                        e.phaseTimer = 0;
+                        e.phase = (e.phase + 1) % 3;
+                    }
+
+                    switch (e.phase) {
+                        case 0: // Side-to-side sweep
+                            e.wobble += 0.025;
+                            e.x = CANVAS_W / 2 - e.w / 2 + Math.sin(e.wobble) * 200;
+                            break;
+                        case 1: // Charge toward player
+                            const targetX = this.player.x + PLAYER_W / 2 - e.w / 2;
+                            e.x += (targetX - e.x) * 0.03;
+                            break;
+                        case 2: // Rapid zigzag
+                            e.wobble += 0.06;
+                            e.x = CANVAS_W / 2 - e.w / 2 + Math.sin(e.wobble) * 250;
+                            break;
+                    }
+
+                    e.x = Math.max(0, Math.min(CANVAS_W - e.w, e.x));
                 }
 
                 // Shooter enemies fire
                 if (e.type === 'shooter' || e.isBoss) {
                     e.shootTimer--;
                     if (e.shootTimer <= 0) {
-                        const interval = e.isBoss ? 40 : 90;
-                        e.shootTimer = interval;
-                        this.enemyBullets.push({
-                            x: e.x + e.w / 2 - 3,
-                            y: e.y + e.h,
-                            w: 6,
-                            h: 10,
-                            speed: e.isBoss ? 5 : 3.5,
-                        });
                         if (e.isBoss) {
-                            // Boss fires spread
+                            // Boss firing patterns based on phase
+                            switch (e.phase) {
+                                case 0: // Spread fire
+                                    e.shootTimer = 35;
+                                    for (let a = -2; a <= 2; a++) {
+                                        this.enemyBullets.push({
+                                            x: e.x + e.w / 2 - 3,
+                                            y: e.y + e.h,
+                                            w: 6, h: 10,
+                                            speed: 4,
+                                            dx: a * 1.2,
+                                        });
+                                    }
+                                    break;
+                                case 1: // Aimed shots at player
+                                    e.shootTimer = 20;
+                                    const dx = this.player.x + PLAYER_W / 2 - (e.x + e.w / 2);
+                                    const dy = this.player.y - (e.y + e.h);
+                                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                                    this.enemyBullets.push({
+                                        x: e.x + e.w / 2 - 3,
+                                        y: e.y + e.h,
+                                        w: 6, h: 10,
+                                        speed: 5,
+                                        dx: (dx / dist) * 5,
+                                        customSpeedY: (dy / dist) * 5,
+                                    });
+                                    break;
+                                case 2: // Circular burst
+                                    e.shootTimer = 50;
+                                    for (let a = 0; a < 8; a++) {
+                                        const angle = (Math.PI * 2 * a) / 8;
+                                        this.enemyBullets.push({
+                                            x: e.x + e.w / 2 - 3,
+                                            y: e.y + e.h / 2,
+                                            w: 6, h: 6,
+                                            speed: 0,
+                                            dx: Math.cos(angle) * 3,
+                                            customSpeedY: Math.sin(angle) * 3,
+                                        });
+                                    }
+                                    break;
+                            }
+                        } else {
+                            e.shootTimer = 90;
                             this.enemyBullets.push({
-                                x: e.x + e.w / 2 - 3 - 20,
+                                x: e.x + e.w / 2 - 3,
                                 y: e.y + e.h,
-                                w: 6,
-                                h: 10,
-                                speed: 4.5,
-                                dx: -1.5,
-                            });
-                            this.enemyBullets.push({
-                                x: e.x + e.w / 2 - 3 + 20,
-                                y: e.y + e.h,
-                                w: 6,
-                                h: 10,
-                                speed: 4.5,
-                                dx: 1.5,
+                                w: 6, h: 10,
+                                speed: 3.5,
                             });
                         }
                     }
@@ -483,9 +921,13 @@ var SpaceGame = (function () {
             }
             for (let i = this.enemyBullets.length - 1; i >= 0; i--) {
                 const b = this.enemyBullets[i];
-                b.y += b.speed;
+                if (b.customSpeedY !== undefined) {
+                    b.y += b.customSpeedY;
+                } else {
+                    b.y += b.speed;
+                }
                 if (b.dx) b.x += b.dx;
-                if (b.y > CANVAS_H + 10) {
+                if (b.y > CANVAS_H + 10 || b.y < -20 || b.x < -20 || b.x > CANVAS_W + 20) {
                     this.enemyBullets.splice(i, 1);
                 }
             }
@@ -496,11 +938,8 @@ var SpaceGame = (function () {
             if (Math.random() > POWERUP_CHANCE) return;
             const type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
             this.powerups.push({
-                type,
-                x: x - POWERUP_SIZE / 2,
-                y,
-                w: POWERUP_SIZE,
-                h: POWERUP_SIZE,
+                type, x: x - POWERUP_SIZE / 2, y,
+                w: POWERUP_SIZE, h: POWERUP_SIZE,
                 speed: 1.5,
                 pulse: Math.random() * Math.PI * 2,
             });
@@ -518,6 +957,13 @@ var SpaceGame = (function () {
                 if (this.collides(this.player, pu)) {
                     this.applyPowerup(pu.type);
                     this.spawnCollectParticles(pu.x + pu.w / 2, pu.y + pu.h / 2, POWERUP_COLORS[pu.type]);
+                    this.sound.powerup();
+                    // Floating Hebrew text
+                    this.addFloatingText(
+                        pu.x + pu.w / 2, pu.y,
+                        POWERUP_LABELS[pu.type],
+                        POWERUP_COLORS[pu.type]
+                    );
                     this.powerups.splice(i, 1);
                 }
             }
@@ -559,9 +1005,23 @@ var SpaceGame = (function () {
                         const e = this.enemies[ei];
                         e.hp--;
                         if (e.hp <= 0) {
-                            this.score += e.score;
+                            this.addCombo();
+                            const multiplier = this.getComboMultiplier();
+                            const points = e.score * multiplier;
+                            this.score += points;
                             this.enemiesKilled++;
+
+                            if (multiplier > 1) {
+                                this.addFloatingText(
+                                    e.x + e.w / 2, e.y,
+                                    `x${multiplier}`,
+                                    '#facc15'
+                                );
+                            }
+
                             this.spawnExplosion(e.x + e.w / 2, e.y + e.h / 2, e.color, e.isBoss ? 40 : 15);
+                            this.sound.explosion();
+                            if (e.isBoss || e.maxHp > 1) this.screenShake();
                             this.spawnPowerup(e.x + e.w / 2, e.y + e.h / 2);
                             if (e.isBoss) this.bossActive = false;
                             this.enemies.splice(ei, 1);
@@ -609,18 +1069,20 @@ var SpaceGame = (function () {
             if (this.player.shield) {
                 this.player.shield = false;
                 this.spawnExplosion(this.player.x + PLAYER_W / 2, this.player.y + PLAYER_H / 2, '#22c55e', 12);
+                this.sound.explosion();
                 return;
             }
             this.lives--;
             this.updateHUD();
             this.spawnExplosion(this.player.x + PLAYER_W / 2, this.player.y + PLAYER_H / 2, '#3b82f6', 20);
+            this.sound.explosion();
+            this.screenShake();
 
             if (this.lives <= 0) {
                 this.gameOver();
                 return;
             }
 
-            // Brief invincibility
             this.player.invincible = true;
             this.player.invincibleEnd = Date.now() + 2000;
         }
@@ -631,8 +1093,7 @@ var SpaceGame = (function () {
                 const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
                 const speed = Math.random() * 4 + 2;
                 this.particles.push({
-                    x,
-                    y,
+                    x, y,
                     vx: Math.cos(angle) * speed,
                     vy: Math.sin(angle) * speed,
                     size: Math.random() * 4 + 2,
@@ -646,8 +1107,7 @@ var SpaceGame = (function () {
         spawnHitParticles(x, y) {
             for (let i = 0; i < 5; i++) {
                 this.particles.push({
-                    x,
-                    y,
+                    x, y,
                     vx: (Math.random() - 0.5) * 4,
                     vy: (Math.random() - 0.5) * 4,
                     size: Math.random() * 3 + 1,
@@ -662,8 +1122,7 @@ var SpaceGame = (function () {
             for (let i = 0; i < 12; i++) {
                 const angle = (Math.PI * 2 * i) / 12;
                 this.particles.push({
-                    x,
-                    y,
+                    x, y,
                     vx: Math.cos(angle) * 3,
                     vy: Math.sin(angle) * 3,
                     size: 3,
@@ -691,10 +1150,32 @@ var SpaceGame = (function () {
         // ---- Spawning Logic ----
         handleSpawning() {
             if (this.bossActive) return;
+
+            // Process wave queue
+            if (this.waveQueue.length > 0) {
+                this.waveSpawnTimer++;
+                const toSpawn = [];
+                for (let i = this.waveQueue.length - 1; i >= 0; i--) {
+                    this.waveQueue[i].delay--;
+                    if (this.waveQueue[i].delay <= 0) {
+                        toSpawn.push(this.waveQueue.splice(i, 1)[0]);
+                    }
+                }
+                for (const w of toSpawn) {
+                    this.spawnEnemyOfType(w.type, w.x, w.y);
+                }
+                return;
+            }
+
             this.spawnTimer++;
             if (this.spawnTimer >= this.spawnInterval) {
                 this.spawnTimer = 0;
-                this.spawnEnemy();
+                // Every few spawns, create a formation wave
+                if (this.level >= 2 && Math.random() < 0.35) {
+                    this.spawnWave();
+                } else {
+                    this.spawnEnemy();
+                }
             }
         }
 
@@ -704,6 +1185,11 @@ var SpaceGame = (function () {
 
             // Background + stars
             this.drawStars();
+
+            // Asteroids (behind everything else)
+            for (const a of this.asteroids) {
+                this.drawAsteroid(ctx, a);
+            }
 
             // Player
             this.drawPlayer(ctx);
@@ -745,6 +1231,66 @@ var SpaceGame = (function () {
                 ctx.fill();
             }
             ctx.globalAlpha = 1;
+
+            // Floating texts
+            for (const ft of this.floatingTexts) {
+                ctx.globalAlpha = ft.life;
+                ctx.fillStyle = ft.color;
+                ctx.font = 'bold 18px "Segoe UI", Tahoma, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.shadowColor = ft.color;
+                ctx.shadowBlur = 8;
+                ctx.fillText(ft.text, ft.x, ft.y);
+                ctx.shadowBlur = 0;
+            }
+            ctx.globalAlpha = 1;
+
+            // Combo display on canvas (large, center)
+            if (this.combo >= 2) {
+                const comboAlpha = Math.min(1, (Date.now() - this.lastKillTime) < 300 ? 1 : 0.6);
+                ctx.globalAlpha = comboAlpha;
+                ctx.fillStyle = '#facc15';
+                ctx.font = 'bold 32px "Segoe UI", Tahoma, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.shadowColor = '#facc15';
+                ctx.shadowBlur = 15;
+                ctx.fillText(`קומבו x${this.combo}!`, CANVAS_W / 2, 60);
+                ctx.shadowBlur = 0;
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        drawAsteroid(ctx, a) {
+            ctx.save();
+            ctx.translate(a.x, a.y);
+            ctx.rotate(a.rotation);
+
+            ctx.fillStyle = '#555';
+            ctx.strokeStyle = '#888';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let i = 0; i < a.vertices.length; i++) {
+                const v = a.vertices[i];
+                const px = Math.cos(v.angle) * a.size / 2 * v.r;
+                const py = Math.sin(v.angle) * a.size / 2 * v.r;
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Crater details
+            ctx.fillStyle = '#444';
+            ctx.beginPath();
+            ctx.arc(a.size * 0.1, -a.size * 0.1, a.size * 0.12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(-a.size * 0.15, a.size * 0.08, a.size * 0.08, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
         }
 
         drawPlayer(ctx) {
@@ -752,7 +1298,6 @@ var SpaceGame = (function () {
             const cx = p.x + p.w / 2;
             const cy = p.y + p.h / 2;
 
-            // Invincibility blink
             if (p.invincible && Math.floor(Date.now() / 100) % 2 === 0) {
                 ctx.globalAlpha = 0.4;
             }
@@ -848,7 +1393,6 @@ var SpaceGame = (function () {
 
                 case 'square':
                     ctx.fillRect(e.x + 2, e.y + 2, e.w - 4, e.h - 4);
-                    // Eye
                     ctx.fillStyle = '#fff';
                     ctx.beginPath();
                     ctx.arc(cx, cy, 5, 0, Math.PI * 2);
@@ -860,7 +1404,9 @@ var SpaceGame = (function () {
                     break;
 
                 case 'boss': {
-                    // Boss body
+                    // Boss body with phase-based color pulse
+                    const pulse = Math.sin(Date.now() * 0.005) * 0.3 + 0.7;
+                    ctx.globalAlpha = pulse;
                     ctx.beginPath();
                     ctx.moveTo(cx, e.y);
                     ctx.lineTo(e.x + e.w, e.y + e.h * 0.3);
@@ -869,8 +1415,11 @@ var SpaceGame = (function () {
                     ctx.lineTo(e.x, e.y + e.h * 0.3);
                     ctx.closePath();
                     ctx.fill();
+                    ctx.globalAlpha = 1;
 
-                    // Boss eyes
+                    // Boss eyes that track player
+                    const eyeTargetX = Math.min(3, Math.max(-3,
+                        (this.player.x + PLAYER_W / 2 - cx) * 0.01));
                     ctx.fillStyle = '#fff';
                     ctx.beginPath();
                     ctx.arc(cx - 15, cy, 6, 0, Math.PI * 2);
@@ -878,8 +1427,8 @@ var SpaceGame = (function () {
                     ctx.fill();
                     ctx.fillStyle = '#000';
                     ctx.beginPath();
-                    ctx.arc(cx - 15, cy, 3, 0, Math.PI * 2);
-                    ctx.arc(cx + 15, cy, 3, 0, Math.PI * 2);
+                    ctx.arc(cx - 15 + eyeTargetX, cy, 3, 0, Math.PI * 2);
+                    ctx.arc(cx + 15 + eyeTargetX, cy, 3, 0, Math.PI * 2);
                     ctx.fill();
                     break;
                 }
@@ -906,7 +1455,6 @@ var SpaceGame = (function () {
             const pulse = Math.sin(pu.pulse) * 3;
             const color = POWERUP_COLORS[pu.type];
 
-            // Glow circle
             ctx.strokeStyle = color;
             ctx.lineWidth = 2;
             ctx.shadowColor = color;
@@ -915,13 +1463,11 @@ var SpaceGame = (function () {
             ctx.arc(cx, cy, pu.w / 2 + pulse, 0, Math.PI * 2);
             ctx.stroke();
 
-            // Background
             ctx.fillStyle = 'rgba(0,0,0,0.6)';
             ctx.beginPath();
             ctx.arc(cx, cy, pu.w / 2 - 2, 0, Math.PI * 2);
             ctx.fill();
 
-            // Icon
             ctx.shadowBlur = 0;
             ctx.font = '16px serif';
             ctx.textAlign = 'center';
@@ -940,8 +1486,11 @@ var SpaceGame = (function () {
             this.updateEnemies();
             this.updateBullets();
             this.updatePowerups();
+            this.updateAsteroids();
             this.checkCollisions();
             this.updateParticles();
+            this.updateFloatingTexts();
+            this.updateCombo();
             this.draw();
 
             this.animId = requestAnimationFrame(() => this.gameLoop());
