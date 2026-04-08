@@ -432,6 +432,10 @@ main {
     border: 2px solid rgba(139, 92, 246, 0.3);
     box-shadow: var(--glow-purple);
     background: #000;
+    min-height: 400px;
+    width: 100%;
+    aspect-ratio: 3/4;
+    max-height: 80vh;
 }
 
 #game-canvas {
