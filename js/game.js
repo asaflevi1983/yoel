@@ -376,6 +376,11 @@ var SpaceGame = (function () {
 
             document.getElementById('start-btn').addEventListener('click', () => this.start());
             document.getElementById('restart-btn').addEventListener('click', () => this.start());
+            document.getElementById('tutorial-dismiss-btn').addEventListener('click', () => this.dismissTutorial());
+            // Dismiss tutorial on any touch on the overlay
+            this.tutorialOverlay.addEventListener('click', () => {
+                if (this.showingTutorial) this.dismissTutorial();
+            });
 
             // Sound toggle
             document.getElementById('sound-toggle').addEventListener('click', () => {
