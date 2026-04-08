@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚀 חוקר החלל - יואל</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+</head>
+<body>
+    <div id="stars-bg"></div>
+
+    <header>
+        <h1 class="main-title">
+            <span class="rocket-icon">🚀</span>
+            !שלום יואל
+            <span class="rocket-icon">🌟</span>
+        </h1>
+        <p class="subtitle">ברוכים הבאים לחוקר החלל</p>
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="apod">
+                <span class="tab-icon">🌌</span>
+                <span class="tab-text">תמונת היום</span>
+            </button>
+            <button class="tab-btn" data-tab="game">
+                <span class="tab-icon">🎮</span>
+                <span class="tab-text">משחק חלל</span>
+            </button>
+        </nav>
+    </header>
+
+    <main>
+        <!-- APOD Section -->
+        <section id="apod-section" class="tab-content active">
+            <div class="apod-controls">
+                <button id="prev-day" class="nav-btn" title="יום קודם">
+                    <span>▶</span> יום קודם
+                </button>
+                <span id="apod-date" class="date-display">טוען...</span>
+                <button id="next-day" class="nav-btn" title="יום הבא">
+                    יום הבא <span>◀</span>
+                </button>
+            </div>
+            <div id="apod-container" class="apod-container">
+                <div id="apod-loading" class="loading">
+                    <div class="spinner"></div>
+                    <p>...טוען תמונה מהחלל</p>
+                </div>
+                <div id="apod-content" class="apod-content" style="display:none;">
+                    <div class="apod-media-wrapper">
+                        <img id="apod-image" class="apod-image" alt="" style="display:none;">
+                        <iframe id="apod-video" class="apod-video" style="display:none;" allowfullscreen></iframe>
+                    </div>
+                    <div class="apod-info">
+                        <h2 id="apod-title" class="apod-title"></h2>
+                        <p id="apod-explanation" class="apod-explanation"></p>
+                        <p id="apod-copyright" class="apod-copyright"></p>
+                    </div>
+                </div>
+                <div id="apod-error" class="error-msg" style="display:none;">
+                    <span class="error-icon">😕</span>
+                    <p>אופס! לא הצלחנו לטעון את התמונה</p>
+                    <button id="retry-btn" class="nav-btn">נסה שוב 🔄</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Game Section -->
+        <section id="game-section" class="tab-content">
+            <div class="game-wrapper">
+                <div class="game-hud">
+                    <div class="hud-item">
+                        <span class="hud-label">ניקוד</span>
+                        <span id="score" class="hud-value">0</span>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-label">שלב</span>
+                        <span id="level" class="hud-value">1</span>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-label">חיים</span>
+                        <span id="lives" class="hud-value">❤️❤️❤️</span>
+                    </div>
+                </div>
+                <div class="canvas-container">
+                    <canvas id="game-canvas"></canvas>
+                    <div id="game-overlay" class="game-overlay">
+                        <div class="overlay-content">
+                            <h2 class="game-title">🚀 משחק חלל 🚀</h2>
+                            <p class="game-instructions">
+                                ⬅️➡️⬆️⬇️ חצים לתנועה<br>
+                                רווח לירי 🔫<br>
+                                <span class="touch-hint">📱 גע במסך לירי, החלק לתנועה</span>
+                            </p>
+                            <button id="start-btn" class="start-btn">!התחל לשחק 🎮</button>
+                            <p id="high-score-display" class="high-score"></p>
+                        </div>
+                    </div>
+                    <div id="game-over-overlay" class="game-overlay" style="display:none;">
+                        <div class="overlay-content game-over-content">
+                            <h2 class="game-over-title">!המשחק נגמר 💥</h2>
+                            <p class="final-score">ניקוד: <span id="final-score">0</span></p>
+                            <p id="new-high-score" class="new-high-score" style="display:none;">!🏆 שיא חדש 🏆</p>
+                            <p class="high-score">שיא: <span id="best-score">0</span></p>
+                            <button id="restart-btn" class="start-btn">!שחק שוב 🔄</button>
+                        </div>
+                    </div>
+                    <div id="level-up-overlay" class="game-overlay level-up-overlay" style="display:none;">
+                        <div class="overlay-content">
+                            <h2 class="level-up-title">!🌟 שלב הבא 🌟</h2>
+                            <p class="level-up-number">שלב <span id="level-up-num">2</span></p>
+                        </div>
+                    </div>
+                </div>
+                <div class="mobile-controls" id="mobile-controls" style="display:none;">
+                    <div class="dpad">
+                        <button class="dpad-btn dpad-up" data-dir="up">⬆️</button>
+                        <div class="dpad-middle">
+                            <button class="dpad-btn dpad-left" data-dir="left">⬅️</button>
+                            <button class="dpad-btn dpad-right" data-dir="right">➡️</button>
+                        </div>
+                        <button class="dpad-btn dpad-down" data-dir="down">⬇️</button>
+                    </div>
+                    <button class="fire-btn" id="fire-btn">🔥<br>ירי</button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>🌟 נבנה עם אהבה עבור יואל 🌟</p>
+    </footer>
+
+    <script src="js/app.js"></script>
+    <script src="js/apod.js"></script>
+    <script src="js/game.js"></script>
+</body>
+</html>
