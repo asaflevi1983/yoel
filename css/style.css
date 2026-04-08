@@ -802,3 +802,48 @@ footer {
     white-space: nowrap;
     border-width: 0;
 }
+
+/* Fullscreen game */
+.game-wrapper:fullscreen,
+.game-wrapper:-webkit-full-screen {
+    background: #000011;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100vw;
+    height: 100vh;
+    padding: 0;
+}
+
+.game-wrapper:fullscreen .canvas-container,
+.game-wrapper:-webkit-full-screen .canvas-container {
+    width: 100%;
+    height: 100%;
+    max-width: 100vw;
+    max-height: 100vh;
+}
+
+.game-wrapper:fullscreen #game-canvas,
+.game-wrapper:-webkit-full-screen #game-canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.game-wrapper:fullscreen .game-hud,
+.game-wrapper:-webkit-full-screen .game-hud {
+    position: fixed;
+    top: 10px;
+    left: 0;
+    right: 0;
+    z-index: 100;
+}
+
+.game-wrapper:fullscreen .mobile-controls,
+.game-wrapper:-webkit-full-screen .mobile-controls {
+    position: fixed;
+    bottom: 20px;
+    left: 0;
+    right: 0;
+    z-index: 100;
+}

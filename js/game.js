@@ -437,6 +437,7 @@ var SpaceGame = (function () {
             });
 
             window.addEventListener('resize', () => this.resizeCanvas());
+            document.addEventListener('fullscreenchange', () => this.resizeCanvas());
         }
 
         handleTouch(touch) {
@@ -478,6 +479,14 @@ var SpaceGame = (function () {
             this.gameOverOverlay.style.display = 'none';
             this.levelUpOverlay.style.display = 'none';
 
+            // Go fullscreen
+            const wrapper = document.querySelector('.game-wrapper');
+            if (wrapper.requestFullscreen) {
+                wrapper.requestFullscreen().catch(() => {});
+            } else if (wrapper.webkitRequestFullscreen) {
+                wrapper.webkitRequestFullscreen();
+            }
+
             if (!this.hasPlayedBefore) {
                 this.showTutorial();
                 return;
@@ -487,6 +496,7 @@ var SpaceGame = (function () {
 
         actualStart() {
             this.running = true;
+            this.resizeCanvas();
             if (this.animId) cancelAnimationFrame(this.animId);
             this.gameLoop();
         }
